@@ -1,0 +1,41 @@
+services:
+  # Backend API
+  - type: web
+    name: enron-investigator-api
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false  # Set in Render dashboard
+      - key: DATA_PATH
+        value: data/emails.csv
+      - key: RESULTS_PATH
+        value: data/results.json
+      - key: EMAILS_CSV_PATH
+        value: data/results_emails.csv
+    disk:
+      name: enron-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 2
+
+  # Frontend Static Site
+  - type: static
+    name: enron-investigator-ui
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: VITE_API_URL
+        fromService:
+          name: enron-investigator-api
+          type: web
+          property: host
+    routes:
+      - type: rewrite
+        source: /api/*
+        destination: https://enron-investigator-api.onrender.com/api/*
+      - type: rewrite
+        source: /*
+        destination: /index.html

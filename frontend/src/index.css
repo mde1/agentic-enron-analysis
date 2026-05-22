@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --enron-red: #e63946;
+  --enron-amber: #f4a261;
+  --enron-dark: #0a0a0f;
+  --enron-panel: #111118;
+  --enron-border: #1e1e2e;
+  --enron-muted: #2a2a3e;
+  --enron-text: #e2e8f0;
+  --enron-dim: #64748b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--enron-dark);
+  color: var(--enron-text);
+  font-family: 'IBM Plex Sans', sans-serif;
+  overflow-x: hidden;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--enron-dark); }
+::-webkit-scrollbar-thumb { background: var(--enron-border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--enron-dim); }
+
+/* Scanline overlay effect */
+.scanlines::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.03) 2px,
+    rgba(0,0,0,0.03) 4px
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Glowing border */
+.glow-red {
+  box-shadow: 0 0 20px rgba(230, 57, 70, 0.3), 0 0 40px rgba(230, 57, 70, 0.1);
+}
+
+.glow-amber {
+  box-shadow: 0 0 20px rgba(244, 162, 97, 0.3), 0 0 40px rgba(244, 162, 97, 0.1);
+}
+
+/* Panel style */
+.panel {
+  background: var(--enron-panel);
+  border: 1px solid var(--enron-border);
+  border-radius: 4px;
+}
+
+/* Mono text */
+.mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Animated gradient background for hero */
+.hero-bg {
+  background: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(230,57,70,0.15) 0%, transparent 60%),
+              radial-gradient(ellipse 60% 40% at 80% 80%, rgba(244,162,97,0.08) 0%, transparent 50%),
+              #0a0a0f;
+}
