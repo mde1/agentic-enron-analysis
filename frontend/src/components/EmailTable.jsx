@@ -1,6 +1,16 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { usePaginatedEmails } from '../hooks/useApi'
+import { usePaginatedEmails, useApi } from '../hooks/useApi'
+
+// --- Row limit options ---
+const ROW_LIMIT_OPTIONS = [
+  { label: 'All rows', value: null },
+  { label: '1,000 rows', value: 1000 },
+  { label: '5,000 rows', value: 5000 },
+  { label: '10,000 rows', value: 10000 },
+  { label: '25,000 rows', value: 25000 },
+  { label: '50,000 rows', value: 50000 },
+]
 
 function Badge({ children, variant = 'default' }) {
   const styles = {
@@ -64,6 +74,30 @@ function EmailRow({ email, onClick, isSelected }) {
 
 function EmailDetail({ email, onClose }) {
   if (!email) return null
+
+  const parseRecipients = (val) => {
+    if (!val || val === '[]' || val === '') return []
+    if (Array.isArray(val)) return val.filter(Boolean)
+    if (typeof val === 'string' && val.startsWith('[')) {
+      try { return JSON.parse(val).filter(Boolean) } catch { return [val] }
+    }
+    return val.split(',').map(s => s.trim()).filter(Boolean)
+  }
+
+  const toList  = parseRecipients(email.to_clean || email.to)
+  const ccList  = parseRecipients(email.x_cc || email.cc)
+  const bccList = parseRecipients(email.x_bcc || email.bcc)
+
+  const signals = [
+    email.low_comm === true || email.low_comm === 'true'
+      ? { label: 'Low-Comm Sender', color: 'amber' } : null,
+    email.contains_reply_forwards === true || email.contains_reply_forwards === 'true'
+      ? { label: 'Has Replies/Forwards', color: 'blue' } : null,
+    email.poi_present === true || email.poi_present === 'true'
+      ? { label: 'POI Present', color: 'red' } : null,
+    email.re ? { label: `Re: ${email.re}`, color: 'default' } : null,
+  ].filter(Boolean)
+
   return (
     <motion.div
       initial={{ opacity: 0, x: 20 }}
@@ -85,27 +119,97 @@ function EmailDetail({ email, onClose }) {
       )}
 
       <div className="space-y-3 text-sm">
+
+        {/* From */}
         <div>
           <div className="text-xs text-enron-dim mono mb-1">FROM</div>
           <div className="text-white">{email.sender_name || email.from_clean}</div>
           <div className="text-enron-dim text-xs mono">{email.from_clean}</div>
         </div>
+
+        {/* To */}
+        {toList.length > 0 && (
+          <div>
+            <div className="text-xs text-enron-dim mono mb-1">TO</div>
+            <div className="space-y-0.5">
+              {toList.map((r, i) => (
+                <div key={i} className="mono text-xs text-enron-dim">{r}</div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Cc */}
+        {ccList.length > 0 && (
+          <div>
+            <div className="text-xs text-enron-dim mono mb-1">CC</div>
+            <div className="space-y-0.5">
+              {ccList.map((r, i) => (
+                <div key={i} className="mono text-xs text-enron-dim">{r}</div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Bcc */}
+        {bccList.length > 0 && (
+          <div>
+            <div className="text-xs text-enron-dim mono mb-1">BCC</div>
+            <div className="space-y-0.5">
+              {bccList.map((r, i) => (
+                <div key={i} className="mono text-xs text-enron-dim">{r}</div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Date */}
         <div>
           <div className="text-xs text-enron-dim mono mb-1">DATE</div>
           <div className="mono text-enron-text">{email.date_str}</div>
         </div>
+
+        {/* Subject */}
         <div>
           <div className="text-xs text-enron-dim mono mb-1">SUBJECT</div>
           <div className="text-white font-medium">{email.subject}</div>
         </div>
+
+        {/* Flags */}
         <div>
           <div className="text-xs text-enron-dim mono mb-1">FLAGS</div>
           <div className="flex gap-2 flex-wrap">
             {email.convicted && <Badge variant="red">Convicted Sender</Badge>}
-            {email.is_suspicious && <Badge variant="amber">Suspicious</Badge>}
+            {email.is_suspicious && <Badge variant="amber">Suspicious Folder</Badge>}
             {!email.convicted && !email.is_suspicious && <Badge>No flags</Badge>}
           </div>
         </div>
+
+        {/* Signals */}
+        {signals.length > 0 && (
+          <div>
+            <div className="text-xs text-enron-dim mono mb-1">SIGNALS</div>
+            <div className="flex gap-1.5 flex-wrap">
+              {signals.map((s, i) => (
+                <Badge key={i} variant={s.color}>{s.label}</Badge>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Label / Source */}
+        {(email.label || email.source || email.sender_type) && (
+          <div>
+            <div className="text-xs text-enron-dim mono mb-1">METADATA</div>
+            <div className="flex gap-1.5 flex-wrap">
+              {email.label && <Badge>{email.label}</Badge>}
+              {email.source && <Badge>{email.source}</Badge>}
+              {email.sender_type && <Badge>{email.sender_type}</Badge>}
+            </div>
+          </div>
+        )}
+
+        {/* Agent assessment */}
         {email.agent_assessment && (
           <div>
             <div className="text-xs text-enron-dim mono mb-1">AGENT ASSESSMENT</div>
@@ -118,27 +222,137 @@ function EmailDetail({ email, onClose }) {
             </div>
           </div>
         )}
+
+        {/* Body */}
+        {(email.body || email.content) && (
+          <div>
+            <div className="text-xs text-enron-dim mono mb-1">BODY</div>
+            <div className="text-sm text-enron-text leading-relaxed whitespace-pre-wrap
+              max-h-64 overflow-y-auto p-3 bg-enron-muted/30 border border-enron-border rounded">
+              {(email.body || email.content || '').trim()}
+            </div>
+          </div>
+        )}
+
       </div>
     </motion.div>
   )
 }
 
-export default function EmailTable() {
+export default function EmailTable({ refreshKey = 0 }) {
   const [filters, setFilters] = useState({})
   const [search, setSearch] = useState('')
   const [selectedEmail, setSelectedEmail] = useState(null)
-  const { data, loading, page, setPage } = usePaginatedEmails({
+
+  // --- NEW: row limit and person filter state ---
+  const [rowLimit, setRowLimit] = useState(null)
+  const [selectedPerson, setSelectedPerson] = useState('')
+
+  // Load convicted persons for the dropdown
+  const { data: convictedPersons } = useApi('/convicted')
+
+  const { data, loading, error, page, setPage } = usePaginatedEmails({
     ...filters,
     search: search || undefined,
-  })
+    row_limit: rowLimit || undefined,
+    convicted_person: selectedPerson || undefined,
+  }, [refreshKey])
 
   const emails = data?.data || []
+
+  // --- NEW: clear person filter handler ---
+  const clearPersonFilter = () => setSelectedPerson('')
 
   return (
     <div className="flex gap-4 h-full">
       {/* Table side */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Filters */}
+
+        {/* --- NEW: Scope controls row --- */}
+        <div className="flex gap-3 mb-3 flex-wrap items-center p-3 panel">
+          <div className="text-xs mono text-enron-dim uppercase tracking-wider flex-shrink-0">
+            Scope
+          </div>
+
+          {/* Row limit selector */}
+          <div className="flex items-center gap-2">
+            <label className="text-xs text-enron-dim mono flex-shrink-0">Rows:</label>
+            <select
+              value={rowLimit ?? ''}
+              onChange={e => {
+                setRowLimit(e.target.value ? parseInt(e.target.value) : null)
+                setPage(1)
+              }}
+              className="px-2 py-1.5 bg-enron-muted border border-enron-border rounded
+                text-xs mono text-enron-text focus:outline-none focus:border-enron-dim"
+            >
+              {ROW_LIMIT_OPTIONS.map(opt => (
+                <option key={opt.label} value={opt.value ?? ''}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Divider */}
+          <div className="w-px h-6 bg-enron-border flex-shrink-0" />
+
+          {/* Convicted person selector */}
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <label className="text-xs text-enron-dim mono flex-shrink-0">Person:</label>
+            <select
+              value={selectedPerson}
+              onChange={e => {
+                setSelectedPerson(e.target.value)
+                setPage(1)
+                // When selecting a person, auto-enable convicted_only
+                if (e.target.value) {
+                  setFilters(f => ({ ...f, convicted_only: undefined }))
+                }
+              }}
+              className="flex-1 min-w-0 px-2 py-1.5 bg-enron-muted border border-enron-border rounded
+                text-xs mono text-enron-text focus:outline-none focus:border-enron-dim"
+            >
+              <option value="">All senders</option>
+              {(convictedPersons || []).map(p => (
+                <option key={p.name} value={p.name}>
+                  {p.name} — {p.role}
+                </option>
+              ))}
+            </select>
+            {selectedPerson && (
+              <button
+                onClick={clearPersonFilter}
+                className="flex-shrink-0 px-2 py-1 text-xs mono text-enron-dim
+                  hover:text-enron-red border border-enron-border rounded hover:border-enron-red/40
+                  transition-colors"
+                title="Clear person filter"
+              >
+                ✕ clear
+              </button>
+            )}
+          </div>
+
+          {/* Active filter pills */}
+          {(rowLimit || selectedPerson) && (
+            <div className="flex gap-1.5 flex-wrap">
+              {rowLimit && (
+                <span className="px-2 py-0.5 rounded text-xs mono bg-blue-950/40
+                  text-blue-400 border border-blue-400/20">
+                  ≤ {rowLimit.toLocaleString()} rows
+                </span>
+              )}
+              {selectedPerson && (
+                <span className="px-2 py-0.5 rounded text-xs mono bg-red-950/40
+                  text-enron-red border border-enron-red/20">
+                  ⚖ {selectedPerson.split(' ')[0]}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Existing filters row */}
         <div className="flex gap-3 mb-4 flex-wrap">
           <input
             type="text"
@@ -175,6 +389,14 @@ export default function EmailTable() {
             <div className="flex items-center justify-center h-32 text-enron-dim text-sm">
               <div className="animate-pulse">Loading emails...</div>
             </div>
+          ) : error ? (
+            <div className="flex items-center justify-center h-32 text-enron-dim text-sm text-center px-6">
+              {error}
+            </div>
+          ) : emails.length === 0 ? (
+            <div className="flex items-center justify-center h-32 text-enron-dim text-sm text-center px-6">
+              No emails match these filters. Try clearing scope filters or run the pipeline again.
+            </div>
           ) : (
             <table className="w-full text-sm">
               <thead className="sticky top-0 bg-enron-dark border-b border-enron-border">
@@ -210,7 +432,14 @@ export default function EmailTable() {
         {/* Pagination */}
         {data && data.pages > 1 && (
           <div className="flex items-center justify-between mt-3 text-xs text-enron-dim">
-            <span className="mono">{data.total.toLocaleString()} results</span>
+            <span className="mono">
+              {data.total.toLocaleString()} results
+              {data.active_filters?.row_limit && (
+                <span className="ml-2 text-enron-border">
+                  (of first {data.active_filters.row_limit.toLocaleString()})
+                </span>
+              )}
+            </span>
             <div className="flex gap-2">
               <button
                 disabled={page === 1}

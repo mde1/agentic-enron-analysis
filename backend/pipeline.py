@@ -22,12 +22,17 @@ from agents.agent3_labeler import run_agent3
 from agents.agent4_suspicious import run_agent4
 from agents.agent5_graph import run_agent5
 from utils.state import PipelineState
+from utils.dataframe import dataframe_from_records_json, dataframe_to_csv
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 load_dotenv()
 
 
-def build_pipeline(data_path: str) -> StateGraph:
+def build_pipeline(
+    data_path: str,
+    row_limit: int | None = None,
+    convicted_person: str | None = None,
+) -> StateGraph:
     """Construct the LangGraph StateGraph for the full pipeline."""
 
     llm = ChatOpenAI(
@@ -37,8 +42,8 @@ def build_pipeline(data_path: str) -> StateGraph:
     )
 
     # Wrap agents as LangGraph node functions
-    def intake_node(state: PipelineState) -> PipelineState:
-        return run_agent1(state, data_path)
+    def intake_node(state):
+        return run_agent1(state, data_path, row_limit=row_limit, convicted_person=convicted_person)
 
     def convicted_research_node(state: PipelineState) -> PipelineState:
         return run_agent2(state, llm)
@@ -72,13 +77,13 @@ def build_pipeline(data_path: str) -> StateGraph:
     return workflow.compile()
 
 
-def run(data_path: str, output_path: str = "data/results.json") -> dict:
+def run(data_path, output_path="data/results.json", row_limit=None, convicted_person=None):
     """Run the full pipeline and return final state."""
     print("\n🚀 Enron Investigator Pipeline Starting")
     print(f"   Data: {data_path}")
     print("=" * 50)
 
-    pipeline = build_pipeline(data_path)
+    pipeline = build_pipeline(data_path, row_limit=row_limit, convicted_person=convicted_person)
 
     initial_state: PipelineState = {
         "emails_json": None,
@@ -137,11 +142,13 @@ def run(data_path: str, output_path: str = "data/results.json") -> dict:
 
     # Also save the labeled email CSV for the API to serve
     if final_state.get("reviewed_emails_json"):
-        import pandas as pd
-        emails_df = pd.read_json(final_state["reviewed_emails_json"], orient="records")
         csv_path = output_path.replace(".json", "_emails.csv")
-        emails_df.to_csv(csv_path, index=False)
-        print(f"💾 Labeled emails saved to: {csv_path}")
+        try:
+            emails_df = dataframe_from_records_json(final_state["reviewed_emails_json"])
+            dataframe_to_csv(emails_df, csv_path)
+            print(f"💾 Labeled emails saved to: {csv_path}")
+        except Exception as e:
+            print(f"   ⚠️  Could not save emails CSV: {e}")
 
     return results
 

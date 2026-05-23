@@ -11,10 +11,11 @@ import pandas as pd
 import networkx as nx
 from collections import defaultdict
 from utils.state import PipelineState
+from utils.dataframe import dataframe_from_records_json
 
 # Limit graph size for performance
 MAX_NODES = 300
-MIN_EDGE_WEIGHT = 2  # only include edges with 2+ emails
+MIN_EDGE_WEIGHT = 1  # include single-email links (small scoped runs)
 
 
 def run_agent5(state: PipelineState) -> PipelineState:
@@ -25,7 +26,7 @@ def run_agent5(state: PipelineState) -> PipelineState:
     print("🔄 [Agent 5] Building knowledge graph...")
 
     try:
-        df = pd.read_json(state["reviewed_emails_json"], orient="records")
+        df = dataframe_from_records_json(state["reviewed_emails_json"])
         convicted_persons = state.get("convicted_persons", [])
 
         # Build convicted email set for node tagging

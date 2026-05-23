@@ -1,12 +1,152 @@
-"""Convenience entrypoint — delegates to backend/pipeline.py."""
-import subprocess
-import sys
-from pathlib import Path
+"""
+LangGraph Pipeline Orchestration
+Wires all 5 agents into a directed graph with shared state.
 
-BACKEND = Path(__file__).resolve().parent / "backend"
-raise SystemExit(
-    subprocess.call(
-        [sys.executable, str(BACKEND / "pipeline.py"), *sys.argv[1:]],
-        cwd=BACKEND,
+Usage:
+    python pipeline.py --input data/emails.csv
+    python pipeline.py --input data/emails.csv --output data/results.json --row-limit 5000
+"""
+
+import argparse
+import json
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+from langgraph.graph import StateGraph, END
+from langchain_openai import ChatOpenAI
+
+from agents.agent1_intake import run_agent1
+from agents.agent2_convicted import run_agent2
+from agents.agent3_labeler import run_agent3
+from agents.agent4_suspicious import run_agent4
+from agents.agent5_graph import run_agent5
+from utils.state import PipelineState
+
+load_dotenv()
+
+
+def build_pipeline(data_path: str, row_limit: int | None = None) -> StateGraph:
+    """Construct the LangGraph StateGraph for the full pipeline."""
+
+    llm = ChatOpenAI(
+        model="gpt-4o-mini",
+        temperature=0,
+        api_key=os.getenv("OPENAI_API_KEY"),
     )
-)
+
+    def intake_node(state: PipelineState) -> PipelineState:
+        # --- row_limit passed into Agent 1 so it caps at read time ---
+        return run_agent1(state, data_path, row_limit=row_limit)
+
+    def convicted_research_node(state: PipelineState) -> PipelineState:
+        return run_agent2(state, llm)
+
+    def label_node(state: PipelineState) -> PipelineState:
+        return run_agent3(state)
+
+    def suspicious_review_node(state: PipelineState) -> PipelineState:
+        return run_agent4(state, llm)
+
+    def graph_build_node(state: PipelineState) -> PipelineState:
+        return run_agent5(state)
+
+    workflow = StateGraph(PipelineState)
+    workflow.add_node("intake", intake_node)
+    workflow.add_node("research_convicts", convicted_research_node)
+    workflow.add_node("label_convicted", label_node)
+    workflow.add_node("review_suspicious", suspicious_review_node)
+    workflow.add_node("build_graph", graph_build_node)
+
+    workflow.set_entry_point("intake")
+    workflow.add_edge("intake", "research_convicts")
+    workflow.add_edge("research_convicts", "label_convicted")
+    workflow.add_edge("label_convicted", "review_suspicious")
+    workflow.add_edge("review_suspicious", "build_graph")
+    workflow.add_edge("build_graph", END)
+
+    return workflow.compile()
+
+
+def run(data_path: str, output_path: str = "data/results.json", row_limit: int | None = None) -> dict:
+    """Run the full pipeline and return final state."""
+    print("\n🚀 Enron Investigator Pipeline Starting")
+    print(f"   Data: {data_path}")
+    if row_limit:
+        print(f"   Row limit: {row_limit:,}")
+    print("=" * 50)
+
+    pipeline = build_pipeline(data_path, row_limit=row_limit)
+
+    initial_state: PipelineState = {
+        "emails_json": None,
+        "email_count": None,
+        "intake_summary": None,
+        "convicted_persons": None,
+        "convicted_names_normalized": None,
+        "labeled_emails_json": None,
+        "convicted_email_count": None,
+        "reviewed_emails_json": None,
+        "suspicious_count": None,
+        "assessed_count": None,
+        "graph_nodes": None,
+        "graph_edges": None,
+        "errors": [],
+        "status": "starting",
+        "progress": 0,
+    }
+
+    final_state = pipeline.invoke(initial_state)
+
+    print("\n" + "=" * 50)
+    print("✅ Pipeline Complete!")
+    print(f"   Emails processed: {final_state.get('email_count', 0):,}")
+    print(f"   Convicted emails labeled: {final_state.get('convicted_email_count', 0):,}")
+    print(f"   Suspicious reviewed: {final_state.get('assessed_count', 0):,}")
+    print(f"   Graph nodes: {len(final_state.get('graph_nodes', [])):,}")
+    print(f"   Graph edges: {len(final_state.get('graph_edges', [])):,}")
+    if final_state.get("errors"):
+        print(f"   ⚠️  Errors: {len(final_state['errors'])}")
+        for err in final_state["errors"]:
+            print(f"      - {err}")
+
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+
+    results = {
+        "summary": {
+            "email_count": final_state.get("email_count"),
+            "intake_summary": final_state.get("intake_summary"),
+            "convicted_email_count": final_state.get("convicted_email_count"),
+            "suspicious_count": final_state.get("suspicious_count"),
+            "assessed_count": final_state.get("assessed_count"),
+            "row_limit": row_limit,  # --- NEW: persist in results ---
+        },
+        "convicted_persons": final_state.get("convicted_persons", []),
+        "graph_nodes": final_state.get("graph_nodes", []),
+        "graph_edges": final_state.get("graph_edges", []),
+        "errors": final_state.get("errors", []),
+        "status": final_state.get("status"),
+    }
+
+    with open(output_path, "w") as f:
+        json.dump(results, f, indent=2, default=str)
+    print(f"\n💾 Results saved to: {output_path}")
+
+    if final_state.get("reviewed_emails_json"):
+        import pandas as pd
+        emails_df = pd.read_json(final_state["reviewed_emails_json"], orient="records")
+        csv_path = output_path.replace(".json", "_emails.csv")
+        emails_df.to_csv(csv_path, index=False)
+        print(f"💾 Labeled emails saved to: {csv_path}")
+
+    return results
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Run the Enron Investigator pipeline")
+    parser.add_argument("--input", default="data/emails.csv", help="Path to email CSV")
+    parser.add_argument("--output", default="data/results.json", help="Output JSON path")
+    parser.add_argument("--row-limit", type=int, default=None, help="Cap number of emails to process")
+    args = parser.parse_args()
+
+    run(args.input, args.output, row_limit=args.row_limit)

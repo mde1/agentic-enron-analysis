@@ -5,9 +5,9 @@ import * as THREE from 'three'
 
 const NODE_COLORS = {
   convicted: '#e63946',
-  enron_employee: '#4fc3f7',
-  external: '#64748b',
-  personal: '#a78bfa',
+  enron_employee: '#f003fc',
+  external: '#5603fc',
+  personal: '#f4fc03',
 }
 
 function Node({ node, position, onHover, onClick, hovered, selected }) {
@@ -40,9 +40,9 @@ function Node({ node, position, onHover, onClick, hovered, selected }) {
         <meshStandardMaterial
           color={baseColor}
           emissive={baseColor}
-          emissiveIntensity={isActive ? 0.8 : (isConvicted ? 0.4 : 0.1)}
-          roughness={0.3}
-          metalness={0.6}
+          emissiveIntensity={isActive ? 1.9 : (isConvicted ? 1.4 : 0.6)}
+          roughness={0.2}
+          metalness={0.4}
         />
       </mesh>
       {/* Glow ring for convicted */}
@@ -102,7 +102,7 @@ function Edge({ start, end, weight, isSuspicious }) {
   return (
     <line geometry={lineGeom}>
       <lineBasicMaterial
-        color={isSuspicious ? '#f4a261' : '#1e3a5f'}
+        color={isSuspicious ? '#24fc03' : '#00e5ff'}
         transparent
         opacity={opacity}
         linewidth={1}
@@ -153,7 +153,7 @@ function GraphScene({ nodes, edges, onSelectNode }) {
 
   return (
     <>
-      <ambientLight intensity={0.3} />
+      <ambientLight intensity={0.6} />
       <pointLight position={[0, 0, 0]} intensity={2} color="#e63946" distance={20} />
       <pointLight position={[20, 10, 20]} intensity={0.5} color="#4fc3f7" />
 
@@ -215,6 +215,20 @@ export default function Graph3D({ nodes = [], edges = [], onSelectNode = () => {
     convicted: nodes.filter(n => n.convicted).length,
     suspicious_links: edges.filter(e => e.is_suspicious_link).length,
   }), [nodes, edges])
+
+  if (nodes.length === 0) {
+    return (
+      <div className="relative w-full h-full flex items-center justify-center">
+        <div className="text-center max-w-md px-6">
+          <div className="text-enron-dim text-sm mono mb-2">No graph data yet</div>
+          <p className="text-enron-dim text-xs leading-relaxed">
+            Run the pipeline from the Pipeline tab (use a row limit like 1,000 for a quick test).
+            The graph needs labeled emails and communication edges from Agent 5.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="relative w-full h-full">

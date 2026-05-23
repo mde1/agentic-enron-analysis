@@ -20,28 +20,42 @@ export function useApi(endpoint, deps = []) {
   return { data, loading, error }
 }
 
-export function usePaginatedEmails(filters = {}) {
+export function usePaginatedEmails(filters = {}, extraDeps = []) {
   const [page, setPage] = useState(1)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const filterKey = JSON.stringify(filters)
 
-  const params = new URLSearchParams({
-    page,
-    page_size: 50,
-    ...Object.fromEntries(Object.entries(filters).filter(([,v]) => v !== undefined && v !== '' && v !== false)),
-  })
+  // Reset to page 1 whenever filters change
+  useEffect(() => { setPage(1) }, [filterKey])
+
+  const params = new URLSearchParams(
+    Object.entries({
+      page,
+      page_size: 50,
+      ...filters,
+    }).filter(([, v]) => v !== undefined && v !== '' && v !== false && v !== null)
+  )
 
   useEffect(() => {
     setLoading(true)
+    setError(null)
     axios.get(`${BASE}/emails?${params}`)
       .then(r => { setData(r.data); setLoading(false) })
-      .catch(() => setLoading(false))
-  }, [page, JSON.stringify(filters)])
+      .catch(e => {
+        setData(null)
+        setError(e.response?.status === 404
+          ? 'No email results yet. Run the pipeline from the Pipeline tab.'
+          : e.message)
+        setLoading(false)
+      })
+  }, [page, filterKey, ...extraDeps])
 
-  return { data, loading, page, setPage }
+  return { data, loading, error, page, setPage }
 }
 
-export async function triggerPipeline() {
-  const r = await axios.post(`${BASE}/run`, {})
+export async function triggerPipeline(rowLimit = null) {
+  const r = await axios.post(`${BASE}/run`, { row_limit: rowLimit })
   return r.data
 }

@@ -79,20 +79,37 @@ def get_emails(
     search: Optional[str] = None,
     sort_by: str = "date",
     sort_dir: str = "desc",
+    # --- NEW ---
+    convicted_person: Optional[str] = None,   # e.g. "Jeffrey Skilling"
+    row_limit: Optional[int] = Query(None, ge=1, le=500000),  # cap rows processed
 ):
     df = _load_emails()
+
+    # --- NEW: cap total rows before any other filtering ---
+    if row_limit is not None:
+        df = df.head(row_limit)
 
     # Filters
     if convicted_only:
         df = df[df["convicted"] == True]
     if suspicious_only:
         df = df[df["is_suspicious"] == True]
+
+    # --- NEW: filter to a specific convicted person ---
+    if convicted_person:
+        person_lower = convicted_person.lower()
+        mask = df.get("convicted_match", pd.Series(dtype=str)).str.lower().str.contains(
+            person_lower, na=False
+        )
+        df = df[mask]
+
     if search:
         search_lower = search.lower()
         mask = (
             df["from_clean"].str.lower().str.contains(search_lower, na=False) |
             df["subject"].str.lower().str.contains(search_lower, na=False) |
-            df.get("sender_name", pd.Series(dtype=str)).str.lower().str.contains(search_lower, na=False)
+            df.get("sender_name", pd.Series(dtype=str)).str.lower().str.contains(search_lower, na=False) |
+            df.get("body", pd.Series(dtype=str)).str.lower().str.contains(search_lower, na=False)
         )
         df = df[mask]
 
@@ -105,10 +122,19 @@ def get_emails(
     end = start + page_size
     page_df = df.iloc[start:end]
 
-    # Select columns to return
     cols = [c for c in [
-        "from_clean", "sender_name", "to_clean", "subject", "date_str",
-        "convicted", "convicted_match", "is_suspicious", "agent_assessment", "x_folder"
+        # Core identity
+        "from_clean", "sender_name", "to_clean", "to", "cc", "bcc",
+        "x_cc", "x_bcc",
+        # Message
+        "subject", "body", "date_str",
+        # Flags & signals
+        "convicted", "convicted_match",
+        "is_suspicious", "suspicious_folders",
+        "low_comm", "contains_reply_forwards", "poi_present",
+        "re", "sender_type", "label", "source",
+        # Metadata
+        "agent_assessment", "x_folder", "folder_name", "unique_mails_from_sender",
     ] if c in page_df.columns]
 
     return {
@@ -116,6 +142,11 @@ def get_emails(
         "page": page,
         "page_size": page_size,
         "pages": (total + page_size - 1) // page_size,
+        # --- NEW: echo back active filters so the UI can confirm state ---
+        "active_filters": {
+            "convicted_person": convicted_person,
+            "row_limit": row_limit,
+        },
         "data": page_df[cols].fillna("").to_dict(orient="records"),
     }
 
@@ -131,6 +162,17 @@ def get_graph():
 
 class RunRequest(BaseModel):
     data_path: Optional[str] = None
+    row_limit: Optional[int] = None
+    convicted_person: Optional[str] = None
+
+
+def _scope_label(row_limit: Optional[int], convicted_person: Optional[str]) -> str:
+    parts = []
+    if convicted_person:
+        parts.append(f"{convicted_person}'s emails")
+    if row_limit:
+        parts.append(f"first {row_limit:,} rows")
+    return " · ".join(parts) if parts else "Full dataset"
 
 
 @app.post("/api/run")
@@ -140,18 +182,31 @@ def trigger_pipeline(req: RunRequest, background_tasks: BackgroundTasks):
         return {"message": "Pipeline already running", "status": pipeline_status}
 
     data_path = req.data_path or DATA_PATH
+    scope = _scope_label(req.row_limit, req.convicted_person)
 
     def run_bg():
         global pipeline_status
-        pipeline_status = {"running": True, "progress": 0, "status": "starting", "errors": []}
+        pipeline_status = {
+            "running": True,
+            "progress": 0,
+            "status": "starting",
+            "errors": [],
+            "scope_label": scope,
+        }
         try:
             from pipeline import run
-            results = run(data_path, RESULTS_PATH)
+            results = run(
+                data_path,
+                RESULTS_PATH,
+                row_limit=req.row_limit,
+                convicted_person=req.convicted_person,
+            )
             pipeline_status = {
                 "running": False,
                 "progress": 100,
                 "status": "complete",
                 "errors": results.get("errors", []),
+                "scope_label": scope,
             }
         except Exception as e:
             pipeline_status = {
@@ -159,6 +214,7 @@ def trigger_pipeline(req: RunRequest, background_tasks: BackgroundTasks):
                 "progress": 0,
                 "status": "error",
                 "errors": [str(e)],
+                "scope_label": scope,
             }
 
     background_tasks.add_task(run_bg)

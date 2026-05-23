@@ -50,11 +50,11 @@ function LoadingScreen() {
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState('graph')
-  const [graphKey, setGraphKey] = useState(0)
+  const [dataVersion, setDataVersion] = useState(0)
 
-  const { data: summary, loading: summaryLoading } = useApi('/summary')
-  const { data: convicted } = useApi('/convicted')
-  const { data: graphData } = useApi('/graph')
+  const { data: summary, loading: summaryLoading } = useApi('/summary', [dataVersion])
+  const { data: convicted } = useApi('/convicted', [dataVersion])
+  const { data: graphData, loading: graphLoading } = useApi('/graph', [dataVersion])
 
   return (
     <div className="min-h-screen hero-bg scanlines">
@@ -106,15 +106,15 @@ export default function Dashboard() {
               className="panel overflow-hidden"
               style={{ height: 'calc(100vh - 320px)', minHeight: '500px' }}
             >
-              {graphData ? (
+              {graphLoading ? (
+                <LoadingScreen />
+              ) : (
                 <Suspense fallback={<LoadingScreen />}>
                   <Graph3D
-                    nodes={graphData.nodes || []}
-                    edges={graphData.edges || []}
+                    nodes={graphData?.nodes || []}
+                    edges={graphData?.edges || []}
                   />
                 </Suspense>
-              ) : (
-                <LoadingScreen />
               )}
             </div>
           )}
@@ -131,13 +131,13 @@ export default function Dashboard() {
 
           {activeTab === 'emails' && (
             <div style={{ height: 'calc(100vh - 280px)', minHeight: '500px' }}>
-              <EmailTable />
+              <EmailTable refreshKey={dataVersion} />
             </div>
           )}
 
           {activeTab === 'pipeline' && (
             <div className="max-w-2xl">
-              <PipelineStatus onComplete={() => setGraphKey(k => k + 1)} />
+              <PipelineStatus onComplete={() => setDataVersion(v => v + 1)} />
 
               <div className="mt-6 panel p-5">
                 <div className="text-xs mono text-enron-dim uppercase tracking-wider mb-3">

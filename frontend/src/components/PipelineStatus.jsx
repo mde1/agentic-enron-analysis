@@ -1,8 +1,18 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import axios from 'axios'
+import { useApi } from '../hooks/useApi'
 
 const BASE = import.meta.env.VITE_API_URL || '/api'
+
+const ROW_LIMIT_OPTIONS = [
+  { label: 'All rows', value: '' },
+  { label: '1,000 rows', value: 1000 },
+  { label: '5,000 rows', value: 5000 },
+  { label: '10,000 rows', value: 10000 },
+  { label: '25,000 rows', value: 25000 },
+  { label: '50,000 rows', value: 50000 },
+]
 
 const AGENTS = [
   { id: 1, name: 'Email Intake', desc: 'Parse & normalize email dataset' },
@@ -52,13 +62,17 @@ function AgentStep({ agent, status, isActive }) {
 }
 
 export default function PipelineStatus({ onComplete }) {
-  const [status, setStatus] = useState(null)
+  const [pipelineStatus, setPipelineStatus] = useState(null)
   const [triggering, setTriggering] = useState(false)
+  const [rowLimit, setRowLimit] = useState('')
+  const [selectedPerson, setSelectedPerson] = useState('')
+
+  const { data: convictedPersons } = useApi('/convicted')
 
   useEffect(() => {
     const poll = () => {
       axios.get(`${BASE}/status`).then(r => {
-        setStatus(r.data)
+        setPipelineStatus(r.data)
         if (r.data.status === 'complete' && onComplete) onComplete()
       }).catch(() => {})
     }
@@ -70,23 +84,43 @@ export default function PipelineStatus({ onComplete }) {
   const trigger = async () => {
     setTriggering(true)
     try {
-      await axios.post(`${BASE}/run`, {})
+      const limit = rowLimit ? parseInt(rowLimit, 10) : null
+      const payload = {
+        row_limit: Number.isFinite(limit) ? limit : null,
+        convicted_person: selectedPerson || null,
+      }
+      await axios.post(`${BASE}/run`, payload)
     } catch (e) {
+      const msg = e.response?.data?.detail ?? e.message ?? 'Failed to start pipeline'
+      setPipelineStatus(prev => ({
+        running: false,
+        progress: 0,
+        status: 'error',
+        errors: [typeof msg === 'string' ? msg : JSON.stringify(msg)],
+        ...(prev || {}),
+      }))
       console.error(e)
     }
     setTriggering(false)
   }
 
-  const currentAgent = status?.status?.match(/agent(\d)/)
-    ? parseInt(status.status.match(/agent(\d)/)[1])
+  const currentAgent = pipelineStatus?.status?.match(/agent(\d)/)
+    ? parseInt(pipelineStatus.status.match(/agent(\d)/)[1])
     : 0
 
-  const isRunning = status?.running
-  const isDone = status?.status === 'complete'
+  const isRunning = pipelineStatus?.running
+  const isDone = pipelineStatus?.status === 'complete'
+
+  // Summary of what will be processed
+  const scopeLabel = [
+    selectedPerson ? `${selectedPerson}'s emails` : null,
+    rowLimit ? `first ${parseInt(rowLimit).toLocaleString()} rows` : null,
+  ].filter(Boolean).join(' · ') || 'Full dataset'
 
   return (
     <div className="panel p-5">
-      <div className="flex items-center justify-between mb-4">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-5">
         <div>
           <div className="text-xs mono text-enron-dim uppercase tracking-wider mb-1">
             Agent Pipeline
@@ -101,29 +135,106 @@ export default function PipelineStatus({ onComplete }) {
             </span>
           </div>
         </div>
-        <button
-          onClick={trigger}
-          disabled={isRunning || triggering}
-          className={`
-            px-4 py-2 rounded text-sm mono font-medium transition-all
-            ${isRunning || triggering
-              ? 'bg-enron-muted text-enron-dim cursor-not-allowed'
-              : 'bg-enron-red hover:bg-red-700 text-white glow-red'
-            }
-          `}
-        >
-          {isRunning ? 'Running...' : triggering ? 'Starting...' : '▶ Run Pipeline'}
-        </button>
       </div>
+
+      {/* --- Scope controls (shown when not running) --- */}
+      {!isRunning && (
+        <div className="mb-5 space-y-3 p-4 bg-enron-muted/30 border border-enron-border rounded">
+          <div className="text-xs mono text-enron-dim uppercase tracking-wider">
+            Configure Run Scope
+          </div>
+
+          {/* Row limit */}
+          <div className="flex items-center gap-3">
+            <label className="text-xs mono text-enron-dim w-24 flex-shrink-0">
+              Row limit
+            </label>
+            <select
+              value={rowLimit}
+              onChange={e => setRowLimit(e.target.value)}
+              className="flex-1 px-2 py-1.5 bg-enron-panel border border-enron-border rounded
+                text-xs mono text-enron-text focus:outline-none focus:border-enron-dim"
+            >
+              {ROW_LIMIT_OPTIONS.map(opt => (
+                <option key={opt.label} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Convicted person filter */}
+          <div className="flex items-center gap-3">
+            <label className="text-xs mono text-enron-dim w-24 flex-shrink-0">
+              Focus on
+            </label>
+            <div className="flex-1 flex gap-2">
+              <select
+                value={selectedPerson}
+                onChange={e => setSelectedPerson(e.target.value)}
+                className="flex-1 px-2 py-1.5 bg-enron-panel border border-enron-border rounded
+                  text-xs mono text-enron-text focus:outline-none focus:border-enron-dim"
+              >
+                <option value="">Everyone (no filter)</option>
+                {(convictedPersons || []).map(p => (
+                  <option key={p.name} value={p.name}>
+                    {p.name} — {p.role}
+                  </option>
+                ))}
+              </select>
+              {selectedPerson && (
+                <button
+                  onClick={() => setSelectedPerson('')}
+                  className="px-2 py-1 text-xs mono text-enron-dim border border-enron-border
+                    rounded hover:text-enron-red hover:border-enron-red/40 transition-colors"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Scope summary + run button */}
+          <div className="flex items-center justify-between pt-1">
+            <div className="text-xs text-enron-dim">
+              <span className="text-enron-dim">Will process: </span>
+              <span className={selectedPerson || rowLimit ? 'text-enron-amber' : 'text-enron-dim'}>
+                {scopeLabel}
+              </span>
+            </div>
+            <button
+              onClick={trigger}
+              disabled={triggering}
+              className={`
+                px-4 py-2 rounded text-sm mono font-medium transition-all
+                ${triggering
+                  ? 'bg-enron-muted text-enron-dim cursor-not-allowed'
+                  : 'bg-enron-red hover:bg-red-700 text-white glow-red'
+                }
+              `}
+            >
+              {triggering ? 'Starting...' : '▶ Run Pipeline'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Progress bar */}
       {isRunning && (
         <div className="mb-4 h-1 bg-enron-muted rounded overflow-hidden">
           <motion.div
             className="h-full bg-gradient-to-r from-enron-red to-enron-amber rounded"
-            animate={{ width: `${status?.progress || 0}%` }}
+            animate={{ width: `${pipelineStatus?.progress || 0}%` }}
             transition={{ duration: 0.5 }}
           />
+        </div>
+      )}
+
+      {/* Running scope reminder */}
+      {isRunning && (pipelineStatus?.scope_label) && (
+        <div className="mb-4 px-3 py-2 bg-enron-muted/40 border border-enron-border rounded
+          text-xs mono text-enron-dim">
+          Scope: <span className="text-enron-amber">{pipelineStatus.scope_label}</span>
         </div>
       )}
 
@@ -145,10 +256,10 @@ export default function PipelineStatus({ onComplete }) {
       </div>
 
       {/* Errors */}
-      {status?.errors?.length > 0 && (
+      {pipelineStatus?.errors?.length > 0 && (
         <div className="mt-4 p-3 bg-red-950/30 border border-enron-red/20 rounded">
           <div className="text-xs mono text-enron-red uppercase mb-1">Errors</div>
-          {status.errors.map((e, i) => (
+          {pipelineStatus.errors.map((e, i) => (
             <div key={i} className="text-xs text-enron-dim">{e}</div>
           ))}
         </div>

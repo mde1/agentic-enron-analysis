@@ -14,6 +14,7 @@ import pandas as pd
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from utils.state import PipelineState
+from utils.dataframe import dataframe_from_records_json
 
 SYSTEM_PROMPT = """You are a financial crimes investigator analyzing internal Enron emails.
 You have been given emails flagged as suspicious. For each email, assess:
@@ -77,7 +78,7 @@ def run_agent4(state: PipelineState, llm: ChatOpenAI) -> PipelineState:
     print("🔄 [Agent 4] Reviewing suspicious emails...")
 
     try:
-        df = pd.read_json(state["labeled_emails_json"], orient="records")
+        df = dataframe_from_records_json(state["labeled_emails_json"])
 
         suspicious_mask = df["is_suspicious"] == True
         suspicious_count = int(suspicious_mask.sum())

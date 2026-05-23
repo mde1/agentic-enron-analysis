@@ -10,6 +10,7 @@ import json
 import pandas as pd
 import re
 from utils.state import PipelineState
+from utils.dataframe import dataframe_from_records_json
 
 
 def _extract_username(email: str) -> str:
@@ -42,7 +43,7 @@ def run_agent3(state: PipelineState) -> PipelineState:
     print("🔄 [Agent 3] Labeling convicted individuals in dataset...")
 
     try:
-        df = pd.read_json(state["emails_json"], orient="records")
+        df = dataframe_from_records_json(state["emails_json"])
         convicted_persons = state.get("convicted_persons", [])
 
         if not convicted_persons:
